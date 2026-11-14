@@ -43,6 +43,7 @@ grants.py        UC grants by SP id + warehouse ACL via the permissions API
 run_sql.py       executes .sql files against a warehouse
 setup.sql        creates the smoke schema + Delta and Iceberg tables
 slack/           manifest.yaml - the whole Slack app in one paste
+.github/         workflows/deploy.yml - push to main = sync + deploy + release
 probe/           the throwaway egress/capability probes, already run
 RUNBOOK.md       every command you need
 ```

@@ -1,0 +1,56 @@
+# Deploy the bot to Databricks Apps on every push to main, then cut a GitHub
+# release so each deploy has a tag you can point at.
+#
+# Repo secrets required:
+#   DATABRICKS_HOST    https://dbc-88291452-e090.cloud.databricks.com
+#   DATABRICKS_TOKEN   a workspace PAT (Free Edition has no OIDC federation)
+#
+# This only updates code for an app that already exists. It never creates the
+# app or its resources - setup_app.py owns that.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # release creation
+
+env:
+  APP_NAME: coffee-bot
+  APP_PATH: /Workspace/Users/weadsy1@gmail.com/coffee-bot
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: databricks/setup-cli@main
+
+      - name: Sync source to the workspace
+        run: |
+          databricks sync . "$APP_PATH" --exclude .git --full
+          # sync exits 0 even for paths it did not touch, so prove the files are there
+          databricks workspace list "$APP_PATH"
+
+      - name: Deploy
+        run: databricks apps deploy "$APP_NAME" --source-code-path "$APP_PATH"
+
+      # Only runs if the deploy above succeeded, so a tag always means shipped.
+      - name: Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="deploy-$(date -u +%Y.%m.%d-%H%M)"
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "$tag" \
+            --notes "Deployed $GITHUB_SHA to $APP_NAME." \
+            --latest
