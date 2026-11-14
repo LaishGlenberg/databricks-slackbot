@@ -145,17 +145,86 @@ def check_iceberg() -> str:
     )
 
 
-def _chat(prompt: str, max_tokens: int = 400) -> str:
+def _chat(prompt: str, max_tokens: int = 400,
+          prior: list[ChatMessage] | None = None) -> str:
     if not ENDPOINT:
         raise Skip("set SERVING_ENDPOINT to test")
     # messages must be ChatMessage objects, not dicts
+    messages = list(prior or [])
+    messages.append(ChatMessage(role=ChatMessageRole.USER, content=prompt))
     resp = w.serving_endpoints.query(
         name=ENDPOINT,
-        messages=[ChatMessage(role=ChatMessageRole.USER, content=prompt)],
+        messages=messages,
         max_tokens=max_tokens,
     )
     choices = getattr(resp, "choices", None)
     return (choices[0].message.content if choices else "").strip()
+
+
+# ---------------------------------------------------------------------------
+# Memory: opt in, never automatic.
+#
+# Nothing is remembered unless the message carries a standalone !mem / !memory
+# / !save token. Then the user's message and the bot's reply are both kept, and
+# later asks in the same channel get those turns as context. !forget / !clear
+# drops the channel's memory. In-process only - it is lost on restart, which is
+# the point of keeping this basic.
+# ---------------------------------------------------------------------------
+MEM_FLAGS = {"!mem", "!memory", "!save"}
+FORGET_FLAGS = {"!forget", "!clear"}
+MEMORY: dict[str, list[dict]] = {}
+MEM_TURNS = 10
+
+
+def take_flag(text: str) -> tuple[str, bool, bool]:
+    """Split the flags off a question -> (question, save, forget).
+
+    Only a whole token counts, so '!memorable' inside prose does not silently
+    turn memory on.
+    """
+    words = text.split()
+    low = [wd.lower() for wd in words]
+    kept = [wd for wd, lw in zip(words, low) if lw not in MEM_FLAGS | FORGET_FLAGS]
+    return " ".join(kept), any(wd in MEM_FLAGS for wd in low), any(
+        wd in FORGET_FLAGS for wd in low
+    )
+
+
+def history(channel: str) -> list[ChatMessage]:
+    """Remembered exchanges for a channel, oldest first."""
+    messages: list[ChatMessage] = []
+    for turn in MEMORY.get(channel, []):
+        messages.append(ChatMessage(role=ChatMessageRole.USER, content=turn["user"]))
+        messages.append(
+            ChatMessage(role=ChatMessageRole.ASSISTANT, content=turn["assistant"])
+        )
+    return messages
+
+
+def remember(channel: str, question: str, reply: str) -> None:
+    turns = MEMORY.setdefault(channel, [])
+    turns.append({"user": question, "assistant": reply})
+    del turns[:-MEM_TURNS]
+    print(f"memory: {channel} holds {len(turns)} turn(s)", flush=True)
+
+
+def reply_for(channel: str, question: str) -> str:
+    """Answer one question, saving the exchange only if the flag was present.
+
+    !forget wins over everything else: it clears and returns without asking the
+    model or storing anything.
+    """
+    question, save, forget = take_flag(question)
+    if forget:
+        MEMORY.pop(channel, None)
+        print(f"memory: {channel} cleared", flush=True)
+        return "memory cleared"
+    if not question:
+        return "ask me something"
+    text = answer(question, prior=history(channel))
+    if save:
+        remember(channel, question, text)
+    return text
 
 
 def check_serving() -> str:
@@ -216,9 +285,9 @@ bolt = App(
 )
 
 
-def answer(question: str) -> str:
-    """Ask the serving endpoint. Used by the slash command, mentions and DMs."""
-    return _chat(question)[:3000]
+def answer(question: str, prior: list[ChatMessage] | None = None) -> str:
+    """Ask the serving endpoint, optionally with remembered turns in front."""
+    return _chat(question, prior=prior)[:3000]
 
 
 def _react(client, channel: str, ts: str, name: str, *, add: bool) -> None:
@@ -239,7 +308,7 @@ def _answer(client, say, event, question: str) -> None:
 
     ok = True
     try:
-        reply = answer(question) if question else "ask me something"
+        reply = reply_for(channel, question)
     except Skip as e:
         reply, ok = f":warning: {e}", False
     except Exception as e:
@@ -258,7 +327,17 @@ def handle_dbrick(ack, respond, command):
     # can answer after this immediate acknowledgement.
     respond(":eyes: on it…")
     question = command["text"].strip()
-    target = lambda: respond(answer(question) if question else run_all())
+    channel = command["channel_id"]
+
+    def target() -> None:
+        try:
+            respond(reply_for(channel, question) if question else run_all())
+        except Skip as e:
+            respond(f":warning: {e}")
+        except Exception as e:
+            respond(f":x: {type(e).__name__}: {safe(first_line(e))}")
+            traceback.print_exc()
+
     threading.Thread(target=target, daemon=True).start()
 
 
