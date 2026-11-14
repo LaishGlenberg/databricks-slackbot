@@ -29,6 +29,10 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      # Unified auth reads these directly; without them the CLI has no creds.
+      DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
