@@ -12,8 +12,12 @@ All commands live in **[RUNBOOK.md](RUNBOOK.md)** — deploy, grants, logs, rest
 | `/dbrick` (no text) | runs the stack checks below |
 | `@dbrick-bot <question>` | 👀 reaction on your message → answer in thread → 👀 replaced with ✅ / ❌ |
 | DM | same as a mention |
+| any of the above + `!mem` / `!memory` / `!save` | that exchange is remembered; later asks in the same channel get it as context |
+| any of the above + `!forget` / `!clear` | drops the channel's memory, no model call |
 
 Slash commands cannot get a reaction — a slash command is not a message, so there is no `ts` to react to. That is why the 👀 lives on mentions.
+
+Memory is opt-in per message, in-process only, last 10 exchanges per channel. It is gone on restart.
 
 ## What the checks prove
 
