@@ -1,37 +1,42 @@
 # Slack app manifest - the whole app definition in one paste.
-# Create: https://api.slack.com/apps -> Create New App -> From an app manifest
-# Pick your workspace, paste this as YAML, then Install to Workspace.
+# Update: https://api.slack.com/apps -> your app -> App Manifest -> paste -> Save
+# Saving scope changes requires a reinstall, which mints a NEW xoxb- token.
 #
-# Socket Mode means no request URLs anywhere. Scopes are kept to the bare
-# minimum: post messages, and one slash command.
+# Socket Mode means no request URLs anywhere.
 
 display_information:
-  name: Databricks Smoke
-  description: Runs /smoke against the Databricks stack.
+  name: dbrick-bot
+  description: Answers questions with a Databricks serving endpoint, and checks the stack.
   background_color: "#1f2937"
 
 features:
   app_home:
     home_tab_enabled: false
-    # Keep the messages tab on: without it the app won't appear under Apps.
     messages_tab_enabled: true
     messages_tab_read_only_enabled: false
   bot_user:
-    display_name: dbx-smoke
+    display_name: dbrick-bot
     always_online: true
   slash_commands:
-    - command: /smoke
-      description: Test the Databricks stack
-      usage_hint: "(no arguments)"
+    - command: /dbrick
+      description: Ask a question, or leave empty to test the stack
+      usage_hint: "(question, or empty)"
       should_escape: false
 
 oauth_config:
   scopes:
     bot:
-      - chat:write   # post the result
-      - commands     # /smoke
+      - app_mentions:read   # see @mentions
+      - chat:write          # post replies
+      - commands            # /dbrick
+      - im:history          # read DM messages
+      - reactions:write     # :eyes: while working, then settle
 
 settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
   socket_mode_enabled: true
   org_deploy_enabled: false
   token_rotation_enabled: false

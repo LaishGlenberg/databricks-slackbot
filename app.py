@@ -145,18 +145,21 @@ def check_iceberg() -> str:
     )
 
 
-def check_serving() -> str:
+def _chat(prompt: str, max_tokens: int = 400) -> str:
     if not ENDPOINT:
         raise Skip("set SERVING_ENDPOINT to test")
     # messages must be ChatMessage objects, not dicts
     resp = w.serving_endpoints.query(
         name=ENDPOINT,
-        messages=[ChatMessage(role=ChatMessageRole.USER, content="Reply with: pong")],
-        max_tokens=10,
+        messages=[ChatMessage(role=ChatMessageRole.USER, content=prompt)],
+        max_tokens=max_tokens,
     )
-    reply = getattr(resp, "choices", None)
-    text = reply[0].message.content if reply else str(resp)
-    return f"{ENDPOINT} -> {text.strip()[:40]!r}"
+    choices = getattr(resp, "choices", None)
+    return (choices[0].message.content if choices else "").strip()
+
+
+def check_serving() -> str:
+    return f"{ENDPOINT} -> {_chat('Reply with: pong', max_tokens=10)[:40]!r}"
 
 
 # Out of scope for now (agreed): MLflow needs an experiment + CAN_EDIT on the
@@ -186,7 +189,7 @@ CHECKS = [
 
 
 def run_all() -> str:
-    lines = ["*Databricks smoke test*"]
+    lines = ["*Stack check*"]
     passed = 0
 
     for name, fn in CHECKS:
@@ -213,11 +216,75 @@ bolt = App(
 )
 
 
-@bolt.command("/smoke")
-def handle_smoke(ack, respond):
-    ack()  # Slack needs this within 3s, always do it first
-    # respond() stays valid ~30 min, so slow warehouse queries are fine
-    threading.Thread(target=lambda: respond(run_all()), daemon=True).start()
+def answer(question: str) -> str:
+    """Ask the serving endpoint. Used by the slash command, mentions and DMs."""
+    return _chat(question)[:3000]
+
+
+def _react(client, channel: str, ts: str, name: str, *, add: bool) -> None:
+    """Reactions are best-effort - never let one fail a reply."""
+    try:
+        if add:
+            client.reactions_add(channel=channel, timestamp=ts, name=name)
+        else:
+            client.reactions_remove(channel=channel, timestamp=ts, name=name)
+    except Exception:
+        print(f"reaction {name} {'add' if add else 'remove'} failed", flush=True)
+
+
+def _answer(client, say, event, question: str) -> None:
+    """React to the user's message, answer in-thread, then settle the reaction."""
+    channel, ts = event["channel"], event["ts"]
+    _react(client, channel, ts, "eyes", add=True)
+
+    ok = True
+    try:
+        reply = answer(question) if question else "ask me something"
+    except Skip as e:
+        reply, ok = f":warning: {e}", False
+    except Exception as e:
+        reply, ok = f":x: {type(e).__name__}: {safe(first_line(e))}", False
+        traceback.print_exc()
+
+    say(text=reply, thread_ts=ts)
+    _react(client, channel, ts, "eyes", add=False)
+    _react(client, channel, ts, "white_check_mark" if ok else "x", add=True)
+
+
+@bolt.command("/dbrick")
+def handle_dbrick(ack, respond, command):
+    ack()  # Slack needs this within 3s
+    # respond() stays valid ~30 min, so a slow warehouse query or LLM call
+    # can answer after this immediate acknowledgement.
+    respond(":eyes: on it…")
+    question = command["text"].strip()
+    target = lambda: respond(answer(question) if question else run_all())
+    threading.Thread(target=target, daemon=True).start()
+
+
+@bolt.event("app_mention")
+def handle_mention(event, say, client):
+    # "<@U123> how many orders" -> strip the leading mention
+    question = event["text"].split(">", 1)[-1].strip()
+    threading.Thread(
+        target=_answer,
+        args=(client, say, event, question),
+        daemon=True,
+    ).start()
+
+
+@bolt.event("message")
+def handle_dm(event, say, client):
+    # Bolt hands us every message event; only DMs from humans are ours
+    if event.get("channel_type") != "im":
+        return
+    if event.get("subtype") or event.get("bot_id"):
+        return
+    threading.Thread(
+        target=_answer,
+        args=(client, say, event, event["text"].strip()),
+        daemon=True,
+    ).start()
 
 
 # ---------------------------------------------------------------------------
