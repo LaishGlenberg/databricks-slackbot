@@ -1,0 +1,37 @@
+# Slack app manifest - the whole app definition in one paste.
+# Create: https://api.slack.com/apps -> Create New App -> From an app manifest
+# Pick your workspace, paste this as YAML, then Install to Workspace.
+#
+# Socket Mode means no request URLs anywhere. Scopes are kept to the bare
+# minimum: post messages, and one slash command.
+
+display_information:
+  name: Databricks Smoke
+  description: Runs /smoke against the Databricks stack.
+  background_color: "#1f2937"
+
+features:
+  app_home:
+    home_tab_enabled: false
+    # Keep the messages tab on: without it the app won't appear under Apps.
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: dbx-smoke
+    always_online: true
+  slash_commands:
+    - command: /smoke
+      description: Test the Databricks stack
+      usage_hint: "(no arguments)"
+      should_escape: false
+
+oauth_config:
+  scopes:
+    bot:
+      - chat:write   # post the result
+      - commands     # /smoke
+
+settings:
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

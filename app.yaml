@@ -1,0 +1,32 @@
+# How Databricks Apps runs this project.
+#
+# IMPORTANT: the `resources:` block that belongs here in the docs does NOT work
+# from app.yaml - resources must be attached to the app itself (see setup_app.py).
+# A `resources:` section in this file is silently ignored and valueFrom fails with
+# "error resolving resource <name>: resource <name> not found".
+#
+# So: setup_app.py owns the resource declarations. This file only says which env
+# var each resource key feeds into.
+
+command:
+  - "python"
+  - "app.py"
+
+env:
+  # Databricks resources - keys must match the resource names in setup_app.py
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    valueFrom: "warehouse"
+  - name: "SERVING_ENDPOINT"
+    valueFrom: "endpoint"
+
+  # Slack secrets, read from the secret scope
+  - name: "SLACK_BOT_TOKEN"
+    valueFrom: "slack-bot-token"
+  - name: "SLACK_APP_TOKEN"
+    valueFrom: "slack-app-token"
+
+  # Plain values, no resource needed
+  - name: "SMOKE_CATALOG"
+    value: "workspace"
+  - name: "SMOKE_SCHEMA"
+    value: "slackbot_smoke"

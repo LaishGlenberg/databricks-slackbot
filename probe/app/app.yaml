@@ -1,0 +1,14 @@
+# Throwaway probe. Tests app egress AND whether app.yaml resource bindings
+# actually inject env vars, before the real app depends on them.
+command:
+  - "python"
+  - "app.py"
+
+env:
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    valueFrom: "warehouse"
+
+resources:
+  - name: "warehouse"
+    type: "sql-warehouse"
+    id: "fda8a728bc5bd1c1"
